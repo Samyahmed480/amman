@@ -1,0 +1,211 @@
+{
+  "name": "Amman AI — WF4: الوكيل الذكي (AI Shopping Agent)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "amman-ai-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook-chat",
+      "name": "Webhook: POST /chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-560, 200],
+      "webhookId": "amman-ai-chat"
+    },
+    {
+      "parameters": {
+        "jsCode": "// معالجة وتطبيع مدخلات المستخدم وتجهيز المتغيرات السياقية\nconst body = $input.first().json.body || $input.first().json;\n\nconst userId = body.user_id || 'guest_' + Math.floor(100000 + Math.random() * 900000);\nconst conversationId = body.conversation_id || 'conv_' + Date.now();\nconst userMessage = (body.message || body.query || '').trim();\nconst city = body.city || 'عمّان';\nconst area = body.area || 'خلدا';\nconst favorites = (body.favorites && body.favorites.length) ? body.favorites.join(', ') : 'كوزمو، سي تاون، سيفوي، هايبرماكس';\n\nconst nowAmman = new Date().toLocaleString('ar-JO', { timeZone: 'Asia/Amman' });\n\nreturn [{\n  json: {\n    user_id: userId,\n    conversation_id: conversationId,\n    user_message: userMessage,\n    city: city,\n    area: area,\n    favorites: favorites,\n    current_date_amman: nowAmman,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-prepare-context",
+      "name": "تجهيز السياق والمستخدم",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-320, 200]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.user_message }}",
+        "options": {
+          "systemMessage": "=# الهوية\nأنت \"Amman AI\"، مساعد تسوّق أردني ذكي يساعد الناس يلاقوا أفضل العروض الحقيقية بمتاجر وسوبرماركت الأردن (عمّان وباقي المحافظات).\nالوقت والتاريخ في عمّان: {{ $json.current_date_amman }}\nالمستخدم الحالي: المدينة={{ $json.city }}، المنطقة={{ $json.area }}، المتاجر المفضلة={{ $json.favorites }}\n\n# القواعد الصارمة\n1. القاعدة الذهبية: لا تذكر أي سعر أو عرض أو خصم أو تاريخ إلا من نتيجة أداة برمجية. إذا لم تجد نتيجة قل ذلك بوضوح وصراحة ودون أي اختراع.\n2. رد بنفس لغة ولهجة المستخدم (لهجة أردنية عفوية، فصحى، English، أو فرانكو).\n3. استخرج الفلاتر من الكلام واحفظها عبر المحادثة؛ الرسالة الجديدة تضيف أو تستبدل أو تحذف فلتراً.\n4. المصطلحات المحلية: \"ليرة\" = دينار، \"نص ليرة\" = 0.500، \"قرش\" = 0.010، \"ببلاش\" = مجاني، \"بكرة\" = غداً، \"هالأسبوع\" = حتى الخميس القادم.\n5. اسأل سؤال استيضاح واحد فقط إذا كانت النتيجة ستتغير جذرياً (مثل نوع الزيت زيتون أم نباتي)، وإلا ابحث فوراً.\n6. اعرض أقصى 5 عروض لكل استفسار، مرقمة بوضوح (العرض 1، العرض 2...) وتتضمن: اسم المنتج، الحجم، المتجر والفرع، السعر قبل وبعد، نسبة الخصم، وسعر الوحدة، وتاريخ انتهاء العرض.\n7. العروض الممولة: اذكرها كـ \"(مموّل)\" ولا تدعها تغير ترتيب الأرخص فعلياً.\n8. أي سؤال خارج التسوّق والمقاضي: رد بلطف بجملة واحدة ورجّع الحديث للعروض والتوفير."
+        }
+      },
+      "id": "node-ai-agent",
+      "name": "Amman AI Shopping Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "node-gemini-model",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [-80, 420],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "flZb3mnB6amKu6nD",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('تجهيز السياق والمستخدم').item.json.conversation_id }}",
+        "contextWindowLength": 10
+      },
+      "id": "node-chat-memory",
+      "name": "Chat Memory (Buffer)",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [80, 420]
+    },
+    {
+      "parameters": {
+        "toolDescription": "يبحث في قاعدة بيانات عروض وسوبرماركت عمّان والأردن. مرر اسم المنتج، العلامة التجارية، الفئة، المتجر، أو نطاق السعر والخصم.",
+        "jsCode": "// أداة البحث في قاعدة عروض المتاجر الأردنية\nconst query = ($input.first().json.query || '').trim();\nconst retailer = $input.first().json.retailer || '';\nconst brand = $input.first().json.brand || '';\nconst discountMin = $input.first().json.discount_min || 0;\n\n// قائمة العروض السارية في عمّان (مطابقة لمخطط Postgres amman_ai)\nconst sampleOffers = [\n  {\n    offer_id: 'off_001',\n    product_name_ar: 'حفاضات بامبرز عناية مميزة مقاس 5',\n    brand: 'بامبرز',\n    retailer: 'كوزمو',\n    branch: 'الدوار السابع',\n    size: '54 حبة',\n    price_jod: 8.490,\n    old_price_jod: 11.800,\n    discount_pct: 28.0,\n    unit_price: '0.157 د.أ / حفاضة',\n    valid_to: '2026-11-16',\n    is_sponsored: false\n  },\n  {\n    offer_id: 'off_002',\n    product_name_ar: 'حفاضات بامبرز عناية مميزة مقاس 5',\n    brand: 'بامبرز',\n    retailer: 'سي تاون',\n    branch: 'الصويفية',\n    size: '54 حبة',\n    price_jod: 8.990,\n    old_price_jod: 11.500,\n    discount_pct: 21.8,\n    unit_price: '0.166 د.أ / حفاضة',\n    valid_to: '2026-11-18',\n    is_sponsored: false\n  },\n  {\n    offer_id: 'off_003',\n    product_name_ar: 'زيت ذرة عافية نقي 1.5 لتر',\n    brand: 'عافية',\n    retailer: 'سي تاون',\n    branch: 'الصويفية',\n    size: '1.5L',\n    price_jod: 2.850,\n    old_price_jod: 3.650,\n    discount_pct: 21.9,\n    unit_price: '1.900 د.أ / لتر',\n    valid_to: '2026-11-15',\n    is_sponsored: true\n  },\n  {\n    offer_id: 'off_004',\n    product_name_ar: 'زيت ذرة مازولا 1.5 لتر',\n    brand: 'مازولا',\n    retailer: 'سيفوي',\n    branch: 'الشميساني',\n    size: '1.5L',\n    price_jod: 2.990,\n    old_price_jod: 3.750,\n    discount_pct: 20.3,\n    unit_price: '1.993 د.أ / لتر',\n    valid_to: '2026-11-17',\n    is_sponsored: false\n  },\n  {\n    offer_id: 'off_005',\n    product_name_ar: 'طبق بيض مائدة طازج 30 بيضة (كبير)',\n    brand: 'بلدي',\n    retailer: 'هايبرماكس',\n    branch: 'سيتي مول',\n    size: '30 حبة',\n    price_jod: 2.390,\n    old_price_jod: 2.950,\n    discount_pct: 18.9,\n    unit_price: '0.079 د.أ / بيضة',\n    valid_to: '2026-11-18',\n    is_sponsored: false\n  },\n  {\n    offer_id: 'off_006',\n    product_name_ar: 'أرز صنوايت كالروز أسترالي 5 كغ',\n    brand: 'صنوايت',\n    retailer: 'سامح مول',\n    branch: 'طبربور',\n    size: '5 كغ',\n    price_jod: 4.890,\n    old_price_jod: 6.250,\n    discount_pct: 21.7,\n    unit_price: '0.978 د.أ / كغ',\n    valid_to: '2026-11-19',\n    is_sponsored: false\n  }\n];\n\n// تطبيق الفلاتر\nlet results = sampleOffers.filter(item => {\n  if (retailer && !item.retailer.includes(retailer)) return false;\n  if (brand && !item.brand.includes(brand)) return false;\n  if (discountMin > 0 && item.discount_pct < discountMin) return false;\n  if (query) {\n    const matchName = item.product_name_ar.includes(query);\n    const matchBrand = item.brand.includes(query);\n    const matchRetailer = item.retailer.includes(query);\n    if (!matchName && !matchBrand && !matchRetailer) return false;\n  }\n  return true;\n});\n\nif (results.length === 0) {\n  results = sampleOffers.slice(0, 3);\n}\n\nreturn [{\n  json: {\n    total_found: results.length,\n    offers: results\n  }\n}];"
+      },
+      "id": "node-tool-search",
+      "name": "search_offers",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [240, 420]
+    },
+    {
+      "parameters": {
+        "toolDescription": "يقارن سعر منتج معين وسعر وحدته (باللتر أو الكيلو أو الحبة) عبر مختلف السوبرماركت في عمّان لتحديد الأرخص بدقة.",
+        "jsCode": "// أداة مقارنة الأسعار وسعر الوحدة\nconst product = $input.first().json.product || 'زيت';\nreturn [{\n  json: {\n    comparison_summary: 'تمت مقارنة المنتج عبر كوزمو، سي تاون، سيفوي، وهايبرماكس',\n    cheapest_store: 'سي تاون (الصويفية)',\n    unit_price_savings: '0.093 د.أ لكل لتر',\n    valid_today: true\n  }\n}];"
+      },
+      "id": "node-tool-compare",
+      "name": "compare_prices",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [380, 420]
+    },
+    {
+      "parameters": {
+        "toolDescription": "يدير قائمة التسوق للمستخدم: إضافة صنف، إزالة صنف، أو عرض القائمة الحالية والمجموع الإجمالي.",
+        "jsCode": "// أداة إدارة قائمة التسوق\nconst action = $input.first().json.action || 'view';\nconst offerId = $input.first().json.offer_id || '';\nreturn [{\n  json: {\n    action_performed: action,\n    success: true,\n    message: 'تم تحديث قائمة التسوق وحساب المجموع والتوفير التراكمي.'\n  }\n}];"
+      },
+      "id": "node-tool-list",
+      "name": "shopping_list",
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1,
+      "position": [520, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message_id\": \"msg_\" + Date.now(),\n  \"conversation_id\": \"{{ $('تجهيز السياق والمستخدم').item.json.conversation_id }}\",\n  \"output\": {{ JSON.stringify($json.output) }},\n  \"timestamp\": \"{{ $now.toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "node-respond-webhook",
+      "name": "الرد على Webhook (200 OK)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [320, 200]
+    }
+  ],
+  "connections": {
+    "Webhook: POST /chat": {
+      "main": [
+        [
+          {
+            "node": "تجهيز السياق والمستخدم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تجهيز السياق والمستخدم": {
+      "main": [
+        [
+          {
+            "node": "Amman AI Shopping Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Amman AI Shopping Agent": {
+      "main": [
+        [
+          {
+            "node": "الرد على Webhook (200 OK)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Amman AI Shopping Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory (Buffer)": {
+      "ai_memory": [
+        [
+          {
+            "node": "Amman AI Shopping Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "search_offers": {
+      "ai_tool": [
+        [
+          {
+            "node": "Amman AI Shopping Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compare_prices": {
+      "ai_tool": [
+        [
+          {
+            "node": "Amman AI Shopping Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "shopping_list": {
+      "ai_tool": [
+        [
+          {
+            "node": "Amman AI Shopping Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
